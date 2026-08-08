@@ -12,7 +12,10 @@ st.set_page_config(
 st.title("⚡ Fast Tax")
 st.write("Consulte a situação cadastral e a **Ficha Completa Exaustiva** de qualquer CNPJ.")
 
-cnpj_input = st.text_input("Digite o CNPJ (somente números ou formatado):", "")
+# Formulário para permitir acionamento tanto pelo botão quanto pela tecla ENTER
+with st.form(key="cnpj_form"):
+    cnpj_input = st.text_input("Digite o CNPJ (somente números ou formatado):", "")
+    submit_button = st.form_submit_button("Consultar CNPJ", type="primary")
 
 def limpar_cnpj(cnpj):
     return "".join(filter(str.isdigit, cnpj))
@@ -47,7 +50,7 @@ def buscar_cnpj(cnpj_limpio):
         
     return None
 
-if st.button("Consultar CNPJ", type="primary"):
+if submit_button:
     cnpj_limpo = limpar_cnpj(cnpj_input)
     
     if len(cnpj_limpo) != 14:
@@ -73,7 +76,7 @@ if st.button("Consultar CNPJ", type="primary"):
                 st.markdown("---")
                 st.header("📋 Ficha Completa da Empresa")
                 
-                # BLROCO 1: Identificação e Dados Institucionais
+                # BLOCO 1: Identificação e Dados Institucionais
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -175,4 +178,4 @@ if st.button("Consultar CNPJ", type="primary"):
                         qualificacao = socio.get("qualificacao_socio") or socio.get("qualificacao") or "Sócio/Administrador"
                         st.write(f"• **{nome_socio}** — *{qualificacao}*")
                 else:
-                    st.write("Nenhum sócio listado no banco de dados da Receita (Comum para Empresários Individuais/MEI).")
+                    st.write("Nenum sócio listado no banco de dados da Receita (Comum para Empresários Individuais/MEI).")
