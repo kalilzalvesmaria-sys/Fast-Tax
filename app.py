@@ -1,36 +1,45 @@
 import streamlit as st
 import requests
+from datetime import datetime
 
 # Configuração da página
 st.set_page_config(
     page_title="Fast Tax - Consulta de Crédito e CNPJ",
     page_icon="⚡",
-    layout="centered"
+    layout="wide"
 )
 
 st.title("⚡ Fast Tax")
-st.write("Consulte a situação cadastral e a **Ficha Completa** de qualquer CNPJ.")
+st.write("Consulte a situação cadastral e a **Ficha Completa Exaustiva** de qualquer CNPJ.")
 
-# Entrada do CNPJ
 cnpj_input = st.text_input("Digite o CNPJ (somente números ou formatado):", "")
 
 def limpar_cnpj(cnpj):
     return "".join(filter(str.isdigit, cnpj))
 
+def formatar_data(data_str):
+    if not data_str:
+        return "Não informada"
+    try:
+        dt = datetime.strptime(str(data_str)[:10], "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return str(data_str)
+
 def buscar_cnpj(cnpj_limpio):
     # Primeira opção: BrasilAPI
     try:
         url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpio}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=6)
         if response.status_code == 200:
             return response.json()
     except:
         pass
     
-    # Segunda opção (Redundância): Minha Receita
+    # Segunda opção: Minha Receita
     try:
         url = f"https://minhareceita.org/{cnpj_limpio}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=6)
         if response.status_code == 200:
             return response.json()
     except:
@@ -44,13 +53,13 @@ if st.button("Consultar CNPJ", type="primary"):
     if len(cnpj_limpo) != 14:
         st.error("⚠️ Por favor, digite um CNPJ válido com 14 dígitos.")
     else:
-        with st.spinner("Buscando dados na Receita Federal..."):
+        with st.spinner("Buscando ficha completa na Receita Federal..."):
             dados = buscar_cnpj(cnpj_limpo)
             
             if not dados:
                 st.error("❌ CNPJ não encontrado ou indisponível no momento.")
             else:
-                # Normalização de dados entre APIs
+                # Normalização de dados
                 razao_social = dados.get("razao_social") or dados.get("nome") or "Não informado"
                 nome_fantasia = dados.get("nome_fantasia") or razao_social
                 situacao = str(dados.get("descricao_situacao_cadastral") or dados.get("situacao") or "").upper()
@@ -62,14 +71,34 @@ if st.button("Consultar CNPJ", type="primary"):
                     st.error(f"🔴 STATUS: RISCO DE CRÉDITO (Situação: {situacao or 'INATIVA/IRREGULAR'})")
                 
                 st.markdown("---")
-                st.subheader("📋 Ficha Completa da Empresa")
+                st.header("📋 Ficha Completa da Empresa")
                 
-                col1, col2 = st.columns(2)
+                # BLROCO 1: Identificação e Dados Institucionais
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
+                    st.subheader("📌 Identificação")
                     st.write(f"**Razão Social:** {razao_social}")
                     st.write(f"**Nome Fantasia:** {nome_fantasia}")
+                    st.write(f"**CNPJ:** {cnpj_input}")
                     
+                    # Matriz / Filial
+                    tipo = dados.get("descricao_identificador_matriz_filial") or dados.get("descricao_matriz_filial") or "Matriz"
+                    st.write(f"**Tipo:** {tipo.upper()}")
+
+                with col2:
+                    st.subheader("🏢 Estrutura & Porte")
+                    porte = dados.get("porte") or dados.get("descricao_porte") or "Não informado"
+                    st.write(f"**Porte:** {porte.upper()}")
+                    
+                    natureza = dados.get("natureza_juridica") or "Não informada"
+                    st.write(f"**Natureza Jurídica:** {natureza}")
+                    
+                    dt_abertura = formatar_data(dados.get("data_inicio_atividade"))
+                    st.write(f"**Data de Abertura:** {dt_abertura}")
+
+                with col3:
+                    st.subheader("💰 Situação Fiscal")
                     # Capital Social
                     capital = dados.get("capital_social", 0)
                     if isinstance(capital, (int, float)):
@@ -77,37 +106,73 @@ if st.button("Consultar CNPJ", type="primary"):
                     else:
                         capital_fmt = f"R$ {capital}"
                     st.write(f"**Capital Social:** {capital_fmt}")
-
-                with col2:
-                    # Endereço
-                    logradouro = dados.get("logradouro", "")
-                    numero = dados.get("numero", "")
-                    bairro = dados.get("bairro", "")
-                    municipio = dados.get("municipio", "")
-                    uf = dados.get("uf", "")
-                    st.write(f"**Endereço:** {logradouro}, {numero} - {bairro}, {municipio}/{uf}")
                     
-                    # Simples / MEI
                     simples = "Sim" if dados.get("opcao_pelo_simples") else "Não / Não informado"
                     mei = "Sim" if dados.get("opcao_pelo_mei") else "Não / Não informado"
                     st.write(f"**Optante do Simples:** {simples}")
                     st.write(f"**Optante do MEI:** {mei}")
 
-                # Atividade Principal (CNAE)
                 st.markdown("---")
-                st.write("**Atividade Econômica Principal (CNAE):**")
-                cnaes = dados.get("cnae_fiscal_descricao") or dados.get("atividade_principal", [{}])[0].get("text", "Não informado")
-                st.info(cnaes)
+
+                # BLOCO 2: Localização e Contato
+                col_loc, col_ct = st.columns(2)
                 
-                # Quadro de Sócios (QSA)
+                with col_loc:
+                    st.subheader("📍 Localização")
+                    logradouro = dados.get("logradouro", "")
+                    numero = dados.get("numero", "")
+                    complemento = dados.get("complemento", "")
+                    bairro = dados.get("bairro", "")
+                    municipio = dados.get("municipio", "")
+                    uf = dados.get("uf", "")
+                    cep = dados.get("cep", "Não informado")
+                    
+                    comp_str = f" ({complemento})" if complemento else ""
+                    st.write(f"**Logradouro:** {logradouro}, {numero}{comp_str}")
+                    st.write(f"**Bairro:** {bairro}")
+                    st.write(f"**Cidade/UF:** {municipio}/{uf}")
+                    st.write(f"**CEP:** {cep}")
+
+                with col_ct:
+                    st.subheader("📞 Contatos Registrados")
+                    tel1 = dados.get("ddd_telefone_1") or dados.get("telefone") or ""
+                    tel2 = dados.get("ddd_telefone_2") or ""
+                    email = dados.get("email") or "Não informado"
+                    
+                    telefones = ", ".join(filter(None, [tel1, tel2])) or "Não informado"
+                    st.write(f"**Telefone(s):** {telefones}")
+                    st.write(f"**E-mail:** {email}")
+
                 st.markdown("---")
-                st.write("**Quadro de Sócios e Administradores (QSA):**")
+
+                # BLOCO 3: Atividades Econômicas (CNAE Principal e Secundários)
+                st.subheader("⚙️ Atividades Econômicas (CNAE)")
+                
+                cnae_principal = dados.get("cnae_fiscal_descricao") or dados.get("atividade_principal", [{}])[0].get("text", "Não informado")
+                st.markdown(f"**Atividade Principal:**")
+                st.info(cnae_principal)
+                
+                cnaes_secundarios = dados.get("cnaes_secundarios") or dados.get("atividades_secundarias") or []
+                if cnaes_secundarios:
+                    with st.expander(f"Ver {len(cnaes_secundarios)} Atividades Secundárias (CNAEs)"):
+                        for item in cnaes_secundarios:
+                            desc = item.get("descricao") or item.get("text") or "Sem descrição"
+                            cod = item.get("codigo") or ""
+                            cod_str = f"[{cod}] " if cod else ""
+                            st.write(f"• {cod_str}{desc}")
+                else:
+                    st.write("Nenhuma atividade secundária cadastrada.")
+
+                st.markdown("---")
+
+                # BLOCO 4: Quadro de Sócios e Administradores
+                st.subheader("👥 Quadro de Sócios e Administradores (QSA)")
                 socios = dados.get("qsa") or dados.get("socios") or []
                 
                 if socios:
                     for socio in socios:
-                        nome_socio = socio.get("nome") or socio.get("nome_socio") or "Sócio"
+                        nome_socio = socio.get("nome") or socio.get("nome_socio") or socio.get("nome_socio_razao_social") or "Sócio"
                         qualificacao = socio.get("qualificacao_socio") or socio.get("qualificacao") or "Sócio/Administrador"
-                        st.write(f"• **{nome_socio}** ({qualificacao})")
+                        st.write(f"• **{nome_socio}** — *{qualificacao}*")
                 else:
-                    st.write("Nenhum sócio listado ou Empresa Individual/MEI.")
+                    st.write("Nenhum sócio listado no banco de dados da Receita (Comum para Empresários Individuais/MEI).")
