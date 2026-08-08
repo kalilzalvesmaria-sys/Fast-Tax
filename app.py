@@ -9,16 +9,16 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚡ Fast Tax")
-st.write("Consulte a situação cadastral e a **Ficha Completa Exaustiva** de qualquer CNPJ.")
-
-# Formulário para permitir acionamento tanto pelo botão quanto pela tecla ENTER
-with st.form(key="cnpj_form"):
-    cnpj_input = st.text_input("Digite o CNPJ (somente números ou formatado):", "")
-    submit_button = st.form_submit_button("Consultar CNPJ", type="primary")
+# Inicializa variáveis de sessão
+if "historico" not in st.session_state:
+    st.session_state.historico = []
+if "favoritos" not in st.session_state:
+    st.session_state.favoritos = []
+if "cnpj_ativo" not in st.session_state:
+    st.session_state.cnpj_ativo = ""
 
 def limpar_cnpj(cnpj):
-    return "".join(filter(str.isdigit, cnpj))
+    return "".join(filter(str.isdigit, str(cnpj)))
 
 def formatar_data(data_str):
     if not data_str:
@@ -30,7 +30,6 @@ def formatar_data(data_str):
         return str(data_str)
 
 def buscar_cnpj(cnpj_limpio):
-    # Primeira opção: BrasilAPI
     try:
         url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpio}"
         response = requests.get(url, timeout=6)
@@ -39,7 +38,6 @@ def buscar_cnpj(cnpj_limpio):
     except:
         pass
     
-    # Segunda opção: Minha Receita
     try:
         url = f"https://minhareceita.org/{cnpj_limpio}"
         response = requests.get(url, timeout=6)
@@ -50,9 +48,63 @@ def buscar_cnpj(cnpj_limpio):
         
     return None
 
-if submit_button:
-    cnpj_limpo = limpar_cnpj(cnpj_input)
+# ==================== BARRA LATERAL (FAVORITOS & HISTÓRICO) ====================
+st.sidebar.title("⭐ Empresas Salvas")
+
+# Lista de Empresas Salvas (Acesso Rápido com 1 clique)
+if st.session_state.favoritos:
+    for idx, fav in enumerate(st.session_state.favoritos):
+        col_f1, col_f2 = st.sidebar.columns([4, 1])
+        with col_f1:
+            if st.button(f"📌 {fav['nome'][:16]}...", key=f"fav_{fav['cnpj']}_{idx}", use_container_width=True):
+                st.session_state.cnpj_ativo = fav['cnpj']
+                st.rerun()
+            st.caption(f"`{fav['cnpj']}` — {fav['status']}")
+        with col_f2:
+            if st.button("❌", key=f"del_fav_{fav['cnpj']}_{idx}"):
+                st.session_state.favoritos.pop(idx)
+                st.rerun()
+        st.sidebar.markdown("---")
+else:
+    st.sidebar.caption("Nenhuma empresa salva ainda. Consulte um CNPJ e clique em '⭐ Salvar Empresa'.")
+
+st.sidebar.title("📜 Histórico Recente")
+if st.session_state.historico:
+    for idx, item in enumerate(reversed(st.session_state.historico)):
+        col_h1, col_h2 = st.sidebar.columns([4, 1])
+        with col_h1:
+            if st.button(f"🔍 {item['nome'][:16]}...", key=f"hist_{item['cnpj']}_{idx}", use_container_width=True):
+                st.session_state.cnpj_ativo = item['cnpj']
+                st.rerun()
+            st.caption(f"`{item['cnpj']}`")
     
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🗑️ Limpar Histórico", use_container_width=True):
+        st.session_state.historico = []
+        st.rerun()
+else:
+    st.sidebar.caption("Nenhuma consulta recente.")
+
+# ==================== PAINEL PRINCIPAL ====================
+st.title("⚡ Fast Tax")
+st.write("Consulte a situação cadastral e a **Ficha Completa Exaustiva** de qualquer CNPJ.")
+
+# Formulário para entrada do CNPJ
+with st.form(key="cnpj_form"):
+    cnpj_input = st.text_input(
+        "Digite o CNPJ (somente números ou formatado):", 
+        value=st.session_state.cnpj_ativo
+    )
+    submit_button = st.form_submit_button("Consultar CNPJ", type="primary")
+
+# Atualiza se enviar formulário
+if submit_button:
+    st.session_state.cnpj_ativo = cnpj_input
+
+# Executa busca
+cnpj_limpo = limpar_cnpj(st.session_state.cnpj_ativo)
+
+if cnpj_limpo:
     if len(cnpj_limpo) != 14:
         st.error("⚠️ Por favor, digite um CNPJ válido com 14 dígitos.")
     else:
@@ -62,17 +114,35 @@ if submit_button:
             if not dados:
                 st.error("❌ CNPJ não encontrado ou indisponível no momento.")
             else:
-                # Normalização de dados
                 razao_social = dados.get("razao_social") or dados.get("nome") or "Não informado"
                 nome_fantasia = dados.get("nome_fantasia") or razao_social
                 situacao = str(dados.get("descricao_situacao_cadastral") or dados.get("situacao") or "").upper()
                 
-                # Validação de Status de Crédito
-                if "ATIVA" in situacao or situacao == "2":
-                    st.success("🟢 STATUS: CRÉDITO GARANTIDO (Empresa Ativa)")
-                else:
-                    st.error(f"🔴 STATUS: RISCO DE CRÉDITO (Situação: {situacao or 'INATIVA/IRREGULAR'})")
+                status_texto = "🟢 CRÉDITO GARANTIDO" if ("ATIVA" in situacao or situacao == "2") else "🔴 RISCO DE CRÉDITO"
+
+                # Histórico
+                registro = {"nome": nome_fantasia, "cnpj": cnpj_limpo, "status": status_texto}
+                if not st.session_state.historico or st.session_state.historico[-1]["cnpj"] != cnpj_limpo:
+                    st.session_state.historico.append(registro)
+
+                # Cabeçalho: Status + Botão de Salvar/Favoritar
+                col_status, col_fav_btn = st.columns([3, 1])
                 
+                with col_status:
+                    if "ATIVA" in situacao or situacao == "2":
+                        st.success("🟢 STATUS: CRÉDITO GARANTIDO (Empresa Ativa)")
+                    else:
+                        st.error(f"🔴 STATUS: RISCO DE CRÉDITO (Situação: {situacao or 'INATIVA/IRREGULAR'})")
+                
+                with col_fav_btn:
+                    ja_favorito = any(f["cnpj"] == cnpj_limpo for f in st.session_state.favoritos)
+                    if ja_favorito:
+                        st.info("⭐ Salva nos Favoritos")
+                    else:
+                        if st.button("⭐ Salvar Empresa", use_container_width=True):
+                            st.session_state.favoritos.append(registro)
+                            st.rerun()
+
                 st.markdown("---")
                 st.header("📋 Ficha Completa da Empresa")
                 
@@ -83,9 +153,8 @@ if submit_button:
                     st.subheader("📌 Identificação")
                     st.write(f"**Razão Social:** {razao_social}")
                     st.write(f"**Nome Fantasia:** {nome_fantasia}")
-                    st.write(f"**CNPJ:** {cnpj_input}")
+                    st.write(f"**CNPJ:** {cnpj_limpo}")
                     
-                    # Matriz / Filial
                     tipo = dados.get("descricao_identificador_matriz_filial") or dados.get("descricao_matriz_filial") or "Matriz"
                     st.write(f"**Tipo:** {tipo.upper()}")
 
@@ -102,7 +171,6 @@ if submit_button:
 
                 with col3:
                     st.subheader("💰 Situação Fiscal")
-                    # Capital Social
                     capital = dados.get("capital_social", 0)
                     if isinstance(capital, (int, float)):
                         capital_fmt = f"R$ {capital:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -148,7 +216,7 @@ if submit_button:
 
                 st.markdown("---")
 
-                # BLOCO 3: Atividades Econômicas (CNAE Principal e Secundários)
+                # BLOCO 3: Atividades Econômicas
                 st.subheader("⚙️ Atividades Econômicas (CNAE)")
                 
                 cnae_principal = dados.get("cnae_fiscal_descricao") or dados.get("atividade_principal", [{}])[0].get("text", "Não informado")
@@ -168,7 +236,7 @@ if submit_button:
 
                 st.markdown("---")
 
-                # BLOCO 4: Quadro de Sócios e Administradores
+                # BLOCO 4: QSA
                 st.subheader("👥 Quadro de Sócios e Administradores (QSA)")
                 socios = dados.get("qsa") or dados.get("socios") or []
                 
@@ -178,4 +246,4 @@ if submit_button:
                         qualificacao = socio.get("qualificacao_socio") or socio.get("qualificacao") or "Sócio/Administrador"
                         st.write(f"• **{nome_socio}** — *{qualificacao}*")
                 else:
-                    st.write("Nenum sócio listado no banco de dados da Receita (Comum para Empresários Individuais/MEI).")
+                    st.write("Nenhum sócio listado no banco de dados da Receita.")
